@@ -1,0 +1,12 @@
+record_no,target_id,stage,field,problem_type,value,description
+4,780bad,parse,timestamp,REQUIRED_FIELD_MISSING,,时间缺失：time_position与last_contact均为空
+5,780bee,parse,heading,OUT_OF_RANGE,360.0,航向越界: 360.0（应0≤heading<360）
+err-length,,decode,frame,LENGTH_ERROR,40,invalid length 40 (expected 41)
+err-magic,780abc,decode,magic,MAGIC_ERROR,0,bad magic 0x0000
+err-magic,780abc,decode,checksum,CHECKSUM_ERROR,2678,"checksum mismatch: got 2678, expected 2527"
+err-checksum,780abc,decode,checksum,CHECKSUM_ERROR,2678,"checksum mismatch: got 2678, expected 2731"
+err-reserved,780abc,decode,checksum,CHECKSUM_ERROR,2678,"checksum mismatch: got 2678, expected 2870"
+err-reserved,780abc,decode,latitude_code,RESERVED_BITS_ERROR,15407784,latitude reserved bits nonzero
+err-reserved,780abc,decode,latitude_code,OUT_OF_RANGE,15407784,latitude decode out of range
+err-flag,780abc,decode,checksum,CHECKSUM_ERROR,2678,"checksum mismatch: got 2678, expected 2677"
+err-flag,780abc,decode,latitude_code,FLAG_VALUE_INCONSISTENCY,2824872,latitude placeholder nonzero
