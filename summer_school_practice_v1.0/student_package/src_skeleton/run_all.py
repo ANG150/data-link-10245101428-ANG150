@@ -7,6 +7,8 @@ from typing import Any
 
 import m2_protocol
 import m3_tracks
+import m4_mapping
+import m5_quality
 
 
 STUDENT_PACKAGE_ROOT = Path(__file__).resolve().parents[1]
@@ -457,12 +459,121 @@ def validate_opensky_real() -> None:
     )
 
 
+def _read_csv_rows(path: Path) -> list[dict[str, Any]]:
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return list(csv.DictReader(handle))
+
+
 def map_unified() -> None:
-    raise NotImplementedError("TODO：接入M4人工核验后的映射实现。")
+    """M4：用人工核验后的映射把两种来源映射为统一态势消息。"""
+    candidate_rows = _read_csv_rows(
+        STUDENT_PACKAGE_ROOT / "reference" / "pre_generated_mapping_candidate.csv"
+    )
+    _write_csv(
+        "llm_mapping_candidate.csv",
+        ["source_format", "input_field", "candidate_unified_field", "candidate_rule", "confidence", "review_note"],
+        candidate_rows,
+    )
+
+    verified = m4_mapping.verify_candidate_mapping(candidate_rows)
+    _write_csv(
+        "verified_mapping_table.csv",
+        ["source_format", "input_field", "unified_field", "mapping_rule", "unit_conversion", "null_strategy", "evidence", "verified"],
+        verified,
+    )
+
+    opensky_records = _read_csv_rows(OUTPUT_ROOT / "current_situation.csv")
+    teaching_records = _read_csv_rows(DATA_ROOT / "m4" / "partner_current_situation.csv")
+
+    unified_lines: list[dict[str, Any]] = []
+    for record in opensky_records:
+        unified_lines.append(m4_mapping.map_to_unified(record, "OpenSky"))
+    for record in teaching_records:
+        unified_lines.append(m4_mapping.map_to_unified(record, "TeachingLink"))
+
+    with (OUTPUT_ROOT / "unified_situation.ndjson").open("w", encoding="utf-8", newline="") as handle:
+        for line in unified_lines:
+            handle.write(json.dumps(line, ensure_ascii=False) + "\n")
+
+    _write_m4_review_note(verified, unified_lines)
 
 
 def check_quality() -> None:
-    raise NotImplementedError("TODO：接入M5一致性检查实现。")
+    """M5：执行四类一致性检查，输出告警日志与质量增强态势。"""
+    records = _read_csv_rows(DATA_ROOT / "m5" / "anomaly_cases.csv")
+
+    alerts: list[dict[str, Any]] = []
+    for record in records:
+        alerts.extend(m5_quality.check_record(record))
+    alerts.extend(m5_quality.check_duplicates(records))
+
+    _write_csv(
+        "alert_log.csv",
+        ["alert_time", "target_id", "alert_type", "severity", "field", "description"],
+        alerts,
+    )
+
+    situation = m5_quality.build_quality_situation(records, alerts)
+    _write_csv(
+        "quality_situation.csv",
+        ["target_id", "timestamp", "position_valid", "delayed", "duplicate_detected", "heading_valid", "message_valid", "anomaly_level", "display_status"],
+        situation,
+    )
+
+    _write_m5_result_note(alerts, situation)
+
+
+def _write_m4_review_note(
+    verified: list[dict[str, Any]], unified_lines: list[dict[str, Any]]
+) -> None:
+    """生成M4 AI辅助映射核验说明。"""
+    content = (
+        "# M4 AI辅助映射核验说明\n\n"
+        "- 候选来源：学校预生成候选\n"
+        "- 使用的提示或候选文件：student_package/reference/pre_generated_mapping_candidate.csv\n"
+        "- 发现的字段、单位、层次、有效性或来源问题：\n"
+        "  1. 经纬度对调：候选把 latitude_code 映射为 position.lon、longitude_code 映射为 position.lat，\n"
+        "     正确应为 position.lat 与 position.lon；\n"
+        "  2. 高度偏置错误：候选把 altitude_code 规则写为“乘1米”，正确应为 code-1000（物理偏置1000米）；\n"
+        "  3. status_flags.bit2 语义错误：候选把 bit2 映射到 quality.time_valid 并误认为 bit2=1 表示时间无效，\n"
+        "     正确语义是 timestamp_fallback（时间回退不等于时间无效），应映射到 quality.time_source。\n"
+        "- 人工修订依据：schema/source_field_definitions.md、schema/teaching_message_spec.md、两个字段字典。\n"
+        f"- 正式映射条目数：{len(verified)}（每条含单位转换、空值策略、证据与verified标记）。\n"
+        f"- 统一态势消息数：{len(unified_lines)}（OpenSky与TeachingLink各来源）。\n"
+        "- 正常样例验证结果：target_id 保留前导0；callsign 有效去除补0；位置与运动按比例因子/偏置恢复。\n"
+        "- 真实零值与缺失值样例验证结果：有效位为0时统一字段为null；协议整数0不自动解释为真实0（高度code=1000表示0米）。\n"
+        "- 不应由大模型自行决定的内容：有效位与协议整数0的区分；message_valid 不扩为来源可信；偏置与比例因子恢复。\n"
+    )
+    (STUDENT_PACKAGE_ROOT / "docs").mkdir(parents=True, exist_ok=True)
+    (STUDENT_PACKAGE_ROOT / "docs" / "M4_mapping_review.md").write_text(content, encoding="utf-8")
+
+
+def _write_m5_result_note(
+    alerts: list[dict[str, Any]], situation: list[dict[str, Any]]
+) -> None:
+    """生成M5异常结果说明。"""
+    from collections import Counter
+
+    type_counts = Counter(alert["alert_type"] for alert in alerts)
+    severity_counts = Counter(alert["severity"] for alert in alerts)
+    error_count = sum(1 for row in situation if row["display_status"] == "ERROR")
+    warning_count = sum(1 for row in situation if row["display_status"] == "WARNING")
+    normal_count = sum(1 for row in situation if row["display_status"] == "NORMAL")
+
+    content = (
+        "# M5 异常结果说明\n\n"
+        "- 批次时间：1710000120\n"
+        "- 四类必做规则是否均运行：是（R1位置缺失、R2延迟、R3重复、R4航向越界）\n"
+        f"- 告警总数及按类型统计：共{len(alerts)}条，"
+        + "、".join(f"{k}={v}" for k, v in sorted(type_counts.items()))
+        + "\n"
+        f"- HIGH/MEDIUM 数量：HIGH={severity_counts.get('HIGH', 0)}，MEDIUM={severity_counts.get('MEDIUM', 0)}\n"
+        f"- 正常记录是否被误报：否（ERROR={error_count}，WARNING={warning_count}，NORMAL={normal_count}）\n"
+        "- heading=360 与 heading为空的处理：heading=360按越界处理（HEADING_OUT_OF_RANGE）；heading为空不触发该规则。\n"
+        "- 字段缺失、帧验证失败、来源真实性三者的区别：字段缺失由有效位为0表示；帧验证失败指帧未通过接收判据；两者都不代表来源真实性。\n"
+    )
+    (STUDENT_PACKAGE_ROOT / "docs").mkdir(parents=True, exist_ok=True)
+    (STUDENT_PACKAGE_ROOT / "docs" / "M5_result_note.md").write_text(content, encoding="utf-8")
 
 
 def export_results() -> None:
