@@ -294,6 +294,8 @@ def build_tracks() -> None:
     ]
     m3_tracks.save_records_to_sqlite(acceptable, str(OUTPUT_ROOT / "states.db"))
 
+    m3_tracks.plot_tracks(tracks, str(OUTPUT_ROOT / "track_map.png"), "教学数据航迹图（3个目标）")
+
     validate_opensky_real()
 
 
@@ -405,6 +407,11 @@ def validate_opensky_real() -> None:
 
     # 7. SQLite接收记录
     m3_tracks.save_records_to_sqlite(decoded, str(output_dir / "received_states.db"))
+
+    # 7b. 真实数据航迹图（选做）
+    m3_tracks.plot_tracks(
+        decoded, str(output_dir / "track_map.png"), "OpenSky真实数据航迹图"
+    )
 
     # 8. 源值与解码值误差
     precision_header = [

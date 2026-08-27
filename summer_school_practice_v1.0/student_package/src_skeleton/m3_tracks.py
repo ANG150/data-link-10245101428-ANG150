@@ -157,3 +157,46 @@ def build_current_situation(records: list[dict[str, Any]]) -> list[dict[str, Any
             "message_valid": record.get("message_valid"),
         })
     return situation
+
+
+def plot_tracks(
+    records: list[dict[str, Any]], output_path: str, title: str = "航迹图"
+) -> None:
+    """选做：按target_id分组绘制经纬度轨迹图。"""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    plt.rcParams["font.sans-serif"] = ["Microsoft YaHei", "SimHei", "DejaVu Sans"]
+    plt.rcParams["axes.unicode_minus"] = False
+
+    grouped: dict[str, list[tuple[float, float]]] = {}
+    for record in records:
+        lat = record.get("lat")
+        lon = record.get("lon")
+        if lat is None or lon is None or lat == "" or lon == "":
+            continue
+        grouped.setdefault(record.get("target_id"), []).append((float(lon), float(lat)))
+
+    fig, ax = plt.subplots(figsize=(12, 8))
+    for target_id, points in grouped.items():
+        xs = [point[0] for point in points]
+        ys = [point[1] for point in points]
+        ax.plot(xs, ys, marker="o", markersize=5, label=target_id)
+        ax.annotate(
+            target_id,
+            (xs[0], ys[0]),
+            fontsize=8,
+            textcoords="offset points",
+            xytext=(6, 6),
+        )
+
+    ax.set_xlabel("经度 (lon)")
+    ax.set_ylabel("纬度 (lat)")
+    ax.set_title(title)
+    ax.legend(loc="best", fontsize=8, ncol=2)
+    ax.grid(True, linestyle="--", alpha=0.5)
+    fig.tight_layout()
+    fig.savefig(output_path, dpi=150)
+    plt.close(fig)
