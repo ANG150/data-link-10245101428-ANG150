@@ -577,7 +577,46 @@ def _write_m5_result_note(
 
 
 def export_results() -> None:
-    raise NotImplementedError("TODO：整理M6关键成果和README；不得把助教检查点当成本模块成果。")
+    """M6：校验关键成果齐全并输出实验统计汇总。"""
+    required_files = [
+        "encoded_messages.bin", "decoded_partner_states.csv", "validation_log.csv",
+        "roundtrip_report.csv", "decoded_multitime.csv", "track_table.csv",
+        "current_situation.csv", "llm_mapping_candidate.csv",
+        "verified_mapping_table.csv", "unified_situation.ndjson",
+        "alert_log.csv", "quality_situation.csv",
+    ]
+    missing = [name for name in required_files if not (OUTPUT_ROOT / name).is_file()]
+
+    encoded_path = OUTPUT_ROOT / "encoded_messages.bin"
+    encoded_size = encoded_path.stat().st_size if encoded_path.is_file() else 0
+    frame_count = encoded_size // m2_protocol.FRAME_SIZE
+
+    track_rows = _read_csv_rows(OUTPUT_ROOT / "track_table.csv")
+    situation_rows = _read_csv_rows(OUTPUT_ROOT / "current_situation.csv")
+    alert_rows = _read_csv_rows(OUTPUT_ROOT / "alert_log.csv")
+    unified_path = OUTPUT_ROOT / "unified_situation.ndjson"
+    unified_lines = (
+        [line for line in unified_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+        if unified_path.is_file() else []
+    )
+    real_summary = OUTPUT_ROOT / "opensky_real" / "experiment_summary.json"
+    real_frames = 0
+    real_tracks = 0
+    if real_summary.is_file():
+        real = json.loads(real_summary.read_text(encoding="utf-8"))
+        real_frames = real.get("frame_count", 0)
+        real_tracks = real.get("track_count", 0)
+
+    print("=== M6 实验结果汇总 ===")
+    print(f"教学帧：{frame_count} 帧（{encoded_size} 字节，41字节/帧）")
+    print(f"航迹记录：{len(track_rows)} 条，目标数：{len(situation_rows)} 个")
+    print(f"统一态势消息：{len(unified_lines)} 条（OpenSky+TeachingLink）")
+    print(f"一致性告警：{len(alert_rows)} 条")
+    print(f"真实数据验证：{real_frames} 帧、{real_tracks} 个目标")
+    if missing:
+        print("缺失必交文件：" + "、".join(missing))
+    else:
+        print("必交文件齐全")
 
 
 def run_pipeline() -> None:
